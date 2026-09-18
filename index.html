@@ -141,6 +141,29 @@
 
   .footer-note{text-align:center;font-size:12px;font-weight:700;color:#8F7FC4;margin-top:16px;letter-spacing:1px;}
 
+  /* ===== 記録パネル ===== */
+  .stats{margin-top:20px;background:linear-gradient(180deg,var(--surface2),var(--surface));border:1px solid rgba(255,255,255,.12);
+    border-radius:18px;padding:14px;box-shadow:0 6px 16px rgba(0,0,0,.35);}
+  .stats h3{margin:0 0 12px;font-size:13px;font-weight:800;color:#A695D6;letter-spacing:1px;display:flex;justify-content:space-between;align-items:center;}
+  .total{display:flex;align-items:baseline;justify-content:center;gap:8px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed rgba(255,255,255,.2);}
+  .total b{font-family:var(--disp);font-size:40px;color:#FFD34D;line-height:1;text-shadow:0 0 18px rgba(255,211,77,.5);}
+  .total span{font-size:13px;font-weight:800;color:#A695D6;}
+  .statlist{display:flex;flex-direction:column;gap:7px;}
+  .statrow{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:700;}
+  .statrow .se{font-size:20px;width:26px;text-align:center;flex:0 0 auto;}
+  .statrow .sn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .statrow .sc{font-family:var(--disp);font-size:17px;flex:0 0 auto;}
+  .statrow.win .sn{color:#FFB3D4;} .statrow.win .sc{color:#FFB3D4;}
+  .statrow.big .sn{color:#FFD34D;} .statrow.big .sc{color:#FFD34D;}
+  .statrow .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.14);flex:0 0 56px;overflow:hidden;}
+  .statrow .bar i{display:block;height:100%;background:#8F7FC4;border-radius:3px;}
+  .statrow.win .bar i{background:var(--win);}
+  .statrow.big .bar i{background:var(--big);}
+  .resetcount{width:100%;margin-top:12px;border:1.5px solid rgba(255,77,94,.5);background:rgba(255,77,94,.15);color:#FF9DA8;
+    font-family:var(--font);font-weight:800;font-size:13px;padding:11px;border-radius:12px;cursor:pointer;}
+  .resetcount.arm{background:#FF1F38;color:#fff;border-color:#FFD34D;}
+  .empty-note{font-size:12px;font-weight:700;color:#8F7FC4;text-align:center;display:block;}
+
   /* ===== 演出ステージ（v3のロジックそのまま） ===== */
   .stage{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:30;background:radial-gradient(120% 120% at 50% 40%, rgba(30,18,64,.88), rgba(8,5,20,.96));padding:24px;overflow:hidden;}
   .stage.show{display:flex;}
@@ -279,6 +302,13 @@
       </div>
     </div>
     <div class="footer-note">✦ がんばったひへの ごほうびマシン ✦</div>
+
+    <div class="stats">
+      <h3><span>📊 ひいた きろく</span><span id="lastReset"></span></h3>
+      <div class="total"><b id="totalCount">0</b><span>かい ひいたよ</span></div>
+      <div class="statlist" id="statList"></div>
+      <button class="resetcount" id="resetCountBtn">🔄 きろくを リセット</button>
+    </div>
   </section>
 
   <section class="settings" id="settings">
@@ -363,7 +393,10 @@
     });
     muted=(config.sound===false);
     try{ $("sndBtn").textContent = muted ? "🔇" : "🔊"; }catch(e){}
+    if(!config.counts||typeof config.counts!=="object") config.counts={};
+    if(typeof config.total!=="number") config.total=0;
     fillDome();
+    renderStats();
   }
   async function save(){ try{ await storeSet(JSON.stringify(config)); }catch(e){} }
 
@@ -525,6 +558,12 @@
     actx(); sndDial();
     var result=pick();
     var level=pickEffectLevel(result.tier||"lose");
+    // 記録をつける
+    var key=result.name||"（なまえなし）";
+    config.counts[key]=(config.counts[key]||0)+1;
+    config.total=(config.total||0)+1;
+    if(!config.since) config.since=new Date().toISOString().slice(0,10);
+    save();
     later(function(){ knob.classList.remove("turning"); runShow(result,level); },650);
   }
 
@@ -600,9 +639,14 @@
       t+=2100;
     }
 
-    // はずれのときは開封前に少し「ため」を作る
-    if(item.tier==="lose" && !testLabel){
-      later(function(){ capsule.classList.remove("drop"); capsule.classList.add("wobble"); sndTicks(); },t);
+    // 開封前に必ず「ため」を作る（結果に関係なく共通＝手がかりにならない）
+    if(!testLabel){
+      later(function(){
+        capsule.classList.remove("drop");
+        // すでに激しく震えている（激アツ以上）ならそのまま、通常時だけゆらゆらに
+        if(!capsule.classList.contains("rattle")) capsule.classList.add("wobble");
+        sndTicks();
+      },t);
       t+=1000;
     }
 
@@ -622,6 +666,7 @@
         }
         else if(item.tier==="win"){ confetti(110,false); sndFanfare(); }
         else{ sndLose(); }
+        renderStats();
       },420);
     },t);
   }
@@ -656,6 +701,40 @@
         setTimeout(function(){ c.remove(); },dur*1000+200);
       })(i);
     }
+  }
+
+  /* ===== 記録の表示 ===== */
+  function renderStats(){
+    $("totalCount").textContent=config.total||0;
+    $("lastReset").textContent = config.since ? (config.since.replace(/-/g,"/")+"から") : "";
+    var box=$("statList"); box.innerHTML="";
+    var keys=Object.keys(config.counts||{}).filter(function(k){ return config.counts[k]>0; });
+    if(!keys.length){
+      var s=document.createElement("span"); s.className="empty-note"; s.textContent="まだ ひいていません";
+      box.appendChild(s); return;
+    }
+    // 現在のごほうび設定の順番を優先し、設定にないものは後ろへ
+    var order=config.items.map(function(it){ return it.name; });
+    keys.sort(function(a,b){
+      var ia=order.indexOf(a), ib=order.indexOf(b);
+      if(ia===-1) ia=999; if(ib===-1) ib=999;
+      if(ia!==ib) return ia-ib;
+      return config.counts[b]-config.counts[a];
+    });
+    var max=Math.max.apply(null,keys.map(function(k){ return config.counts[k]; }));
+    keys.forEach(function(k){
+      var item=null;
+      config.items.forEach(function(it){ if(it.name===k) item=it; });
+      var tier=item?item.tier:"lose";
+      var r=document.createElement("div");
+      r.className="statrow"+(tier==="big"?" big":tier==="win"?" win":"");
+      var pct=Math.round(config.counts[k]/max*100);
+      r.innerHTML='<span class="se">'+(item&&item.emoji?item.emoji:"·")+'</span>'
+        +'<span class="sn">'+k+'</span>'
+        +'<span class="bar"><i style="width:'+pct+'%"></i></span>'
+        +'<span class="sc">'+config.counts[k]+'</span>';
+      box.appendChild(r);
+    });
   }
 
   /* ===== 設定 ===== */
@@ -727,6 +806,22 @@
   }
 
   knob.addEventListener("click", spin);
+
+  // きろくのリセット（誤タップ防止の2回タップ式）
+  var cntArmed=false, cntTimer=null;
+  $("resetCountBtn").addEventListener("click", function(){
+    var b=$("resetCountBtn");
+    if(!cntArmed){
+      cntArmed=true; b.classList.add("arm"); b.textContent="⚠ もういちど タップで リセット";
+      cntTimer=setTimeout(function(){ cntArmed=false; b.classList.remove("arm"); b.textContent="🔄 きろくを リセット"; },3000);
+      return;
+    }
+    clearTimeout(cntTimer); cntArmed=false;
+    b.classList.remove("arm"); b.textContent="🔄 きろくを リセット";
+    config.counts={}; config.total=0; config.since=new Date().toISOString().slice(0,10);
+    save(); renderStats();
+    toast("きろくを リセットしました");
+  });
   function applyMuteIcon(){ $("sndBtn").textContent = muted ? "🔇" : "🔊"; }
   $("sndBtn").addEventListener("click", function(){
     muted=!muted;
@@ -746,7 +841,7 @@
   });
   $("saveBtn").addEventListener("click", function(){
     config.items.forEach(function(it){ if(!it.name) it.name="（なまえなし）"; });
-    save(); toast("ほぞんしました ✓"); fillDome(); setTimeout(showPlay,500);
+    save(); toast("ほぞんしました ✓"); fillDome(); renderStats(); setTimeout(showPlay,500);
   });
 
   document.querySelectorAll(".fxtest button").forEach(function(b){
